@@ -30,10 +30,7 @@ class OpenAIOcrProcessor(
         Use markdown syntax. Don't wrap the whole output into code blocks.
         If there are diagrams on the page, describe them using a Mermaid diagram code block or a code block with ASCII art.
 
-        At the end of the output, add two lines of metadata in the following format:
-        
-        tags: put keywords which describe the transcribed page here, separated by commas
-        title: put the recommended title under which the note should be filed; keep it concise, ideally between 1 to 5 words
+        IMPORTANT: Return ONLY the transcribed content for this single page. Do NOT include any metadata (no tags, no title).
     """
 
     override suspend fun processImage(imageUri: Uri): OcrResult? {
@@ -87,37 +84,81 @@ class OpenAIOcrProcessor(
         Log.d("OpenAIOcrProcessor", "First choice index: ${completion.choices.firstOrNull()?.index}")
         Log.d("OpenAIOcrProcessor", "First choice logprobs: ${completion.choices.firstOrNull()?.logprobs}")
 
-        val content = completion.choices.firstOrNull()?.message?.content ?: ""
-        // extract the metadata lines from the content and remove them from the content
-        // catch possible errors in the metadata extraction
-
-        var text = ""
-        var tags = listOf<String>()
-        var title = ""
-        try {
-            val lines = content.split("\n")
-            // find the last line that starts with "tags: "
-            val tagsLine = lines.last { it.startsWith("tags: ") }
-            tags = tagsLine.split(": ")[1].split(",").map { it.trim() }
-            // find the last line that starts with "title: "
-            val titleLine = lines.last { it.startsWith("title: ") }
-            title = titleLine.split(": ")[1].trim()
-            // remove the metadata lines from the lines list
-            lines.filter { !it.startsWith("tags: ") && !it.startsWith("title: ") }
-            // join the remaining lines into a single string
-            text = lines.joinToString("\n")
-        } catch (e: Exception) {
-            Log.e("OpenAIOcrProcessor", "Error extracting metadata", e)
-            return null
-        }
-
-        // return the ocr result
+        val text = completion.choices.firstOrNull()?.message?.content ?: ""
+        // Return only the page content. Title/tags are generated later for the combined text.
         return OcrResult(
             content = text,
-            tags = tags,
-            title = title
+            tags = emptyList(),
+            title = ""
         )
 
 
+    }
+
+    suspend fun startSession(): ChatTranscriptionSession? {
+        val token = preferencesRepository.getApiKey() ?: return null
+        val openAI = OpenAI(token)
+        return ChatTranscriptionSession(openAI)
+    }
+
+    inner class ChatTranscriptionSession(private val openAI: OpenAI) {
+        private val messages = mutableListOf<ChatMessage>()
+
+        init {
+            messages += ChatMessage(role = ChatRole.System, content = prompt)
+        }
+
+        suspend fun transcribePage(imageUri: Uri, pageIndex: Int): String? {
+            val inputStream = context.contentResolver.openInputStream(imageUri) ?: return null
+            val imageBytes = inputStream.readBytes()
+            inputStream.close()
+            val base64Image = Base64.encodeToString(imageBytes, Base64.DEFAULT)
+            val mimeType = context.contentResolver.getType(imageUri) ?: "image/jpeg"
+
+            val contentParts = arrayListOf<ContentPart>()
+            contentParts.add(TextPart("Transcribe only the content for page $pageIndex. Do not include any metadata."))
+            contentParts.add(ImagePart("data:$mimeType;base64,$base64Image"))
+            val userMessage = ChatMessage(role = ChatRole.User, content = contentParts)
+            messages += userMessage
+
+            val request = ChatCompletionRequest(model = ModelId("gpt-4o-mini"), messages = messages)
+            val completion: ChatCompletion = openAI.chatCompletion(request)
+            val assistantContent = completion.choices.firstOrNull()?.message?.content ?: return null
+            messages += ChatMessage(role = ChatRole.Assistant, content = assistantContent)
+            return assistantContent
+        }
+
+        suspend fun generateTitleAndTags(): Pair<String, List<String>> {
+            val ask = ChatMessage(
+                role = ChatRole.User,
+                content = listOf<ContentPart>(
+                    TextPart(
+                        "Based on the pages transcribed above, respond with exactly two lines:\n" +
+                            "title: <concise title 1–5 words>\n" +
+                            "tags: <comma-separated keywords>"
+                    )
+                )
+            )
+            messages += ask
+            val request = ChatCompletionRequest(model = ModelId("gpt-4o-mini"), messages = messages)
+            val completion = openAI.chatCompletion(request)
+            val content = completion.choices.firstOrNull()?.message?.content.orEmpty()
+            messages += ChatMessage(role = ChatRole.Assistant, content = content)
+
+            var title = ""
+            var tags: List<String> = emptyList()
+            try {
+                val lines = content.lines()
+                val titleLine = lines.firstOrNull { it.startsWith("title:", ignoreCase = true) } ?: ""
+                Log.d("OpenAIOcrProcessor", "titleLine: $titleLine")
+                val tagsLine = lines.firstOrNull { it.startsWith("tags:", ignoreCase = true) } ?: ""
+                Log.d("OpenAIOcrProcessor", "tagsLine: $tagsLine")
+                title = titleLine.substringAfter(":").trim()
+                tags = tagsLine.substringAfter(":").split(',').map { it.trim() }.filter { it.isNotEmpty() }
+            } catch (e: Exception) {
+                Log.e("OpenAIOcrProcessor", "Failed to parse session title/tags", e)
+            }
+            return title to tags
+        }
     }
 }

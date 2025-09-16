@@ -1,10 +1,30 @@
 package me.igrr.scribevault.ui.capture
 
+import android.net.Uri
+import androidx.lifecycle.LiveData
+import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
 
 class CaptureViewModel : ViewModel() {
-    // TODO: Implement ViewModel logic
-    // - Manage camera state and image capture
-    // - Handle image data for rectification and passing to OCR
-    // - Manage the state of the OCR processing indicator (spinner, text, timeout)
-} 
+
+    private val _capturedUris = MutableLiveData<List<Uri>>(emptyList())
+    val capturedUris: LiveData<List<Uri>> = _capturedUris
+
+    fun addCapturedUri(uri: Uri) {
+        val updated = _capturedUris.value.orEmpty().toMutableList()
+        updated.add(uri)
+        _capturedUris.value = updated
+    }
+
+    fun removeAt(position: Int) {
+        val updated = _capturedUris.value.orEmpty().toMutableList()
+        if (position in updated.indices) {
+            updated.removeAt(position)
+            _capturedUris.value = updated
+        }
+    }
+
+    fun clearAll() {
+        _capturedUris.value = emptyList()
+    }
+}

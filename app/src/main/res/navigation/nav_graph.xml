@@ -40,23 +40,22 @@
         android:label="fragment_capture"
         tools:layout="@layout/fragment_capture" >
         <action
-            android:id="@+id/action_captureFragment_to_imageReviewFragment"
-            app:destination="@id/imageReviewFragment" />
+            android:id="@+id/action_captureFragment_to_transcriptionFragment"
+            app:destination="@id/transcriptionFragment" />
         <!-- TODO: Add action to SettingsFragment -->
     </fragment>
 
     <fragment
-        android:id="@+id/imageReviewFragment"
-        android:name="me.igrr.scribevault.ui.imagereview.ImageReviewFragment"
-        android:label="fragment_image_review"
-        tools:layout="@layout/fragment_image_review">
+        android:id="@+id/transcriptionFragment"
+        android:name="me.igrr.scribevault.ui.transcription.TranscriptionFragment"
+        android:label="fragment_transcription"
+        tools:layout="@layout/fragment_transcription">
         <argument
-            android:name="imageUriString"
-            app:argType="string" />
+            android:name="imageUris"
+            app:argType="string[]" />
         <action
-            android:id="@+id/action_imageReviewFragment_to_filingFragment"
+            android:id="@+id/action_transcriptionFragment_to_filingFragment"
             app:destination="@id/filingFragment" />
-        <!-- Action to go back to CaptureFragment will be handled by NavController.popBackStack() or Toolbar back button -->
     </fragment>
 
     <fragment
